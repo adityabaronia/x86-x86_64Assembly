@@ -1,3 +1,4 @@
+; Using NASM
 global main
 
 section .text
