@@ -1,4 +1,5 @@
 ; 32-bit shellcode to download a file, store the file, and execute the stored file
+; using fasm
 format PE console
 use32
 entry main
