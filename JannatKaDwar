@@ -1,0 +1,4 @@
+# Heaven's gate
+# Author: Aditya Baronia
+# Idea: Injecting a shellcode in a 32-bit process and from there travel through heavens gate to execute 64-bit instruction. When executing 64-bit 
+instruction find the ntdll.dll from gs:[0x60] the ldr table. Go through the ntdll's export directory and call the required function.
