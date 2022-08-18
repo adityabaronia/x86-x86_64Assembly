@@ -13,7 +13,7 @@
 ; 6. CloseHandle
 
 
-seperate out 7th point
+;seperate out 7th point
 
 ; How to flow of shellcode should be
 ; Step1: From FS and GS register find out the address of PEB
